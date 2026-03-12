@@ -53,21 +53,24 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await Bun.write(tempFilePath, file);
 
   const aspectRatio = await getVideoAspectRatio(tempFilePath);
+  const processedFilePath = await processVideoForFastStart(tempFilePath);
   const fullAssetPath = `${aspectRatio}/${fileName}`;
 
   const s3file = cfg.s3Client.file(fullAssetPath, {
     bucket: cfg.s3Bucket,
   });
-  await s3file.write(Bun.file(tempFilePath), {
+  await s3file.write(Bun.file(processedFilePath), {
     type: mediaType,
   });
-
 
   const s3URL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${fullAssetPath}`
   video.videoURL = s3URL;
   updateVideo(cfg.db, video);
 
-  await rm(tempFilePath);
+  await Promise.all([
+    rm(tempFilePath, { force: true }),
+    rm(processedFilePath, { force: true }),
+  ]);
 
   return respondWithJSON(200, video);
 }
@@ -116,4 +119,37 @@ if (height === Math.floor(16 * (width / 9))) {
     return "portrait";
 }
   return "other";
+}
+
+async function processVideoForFastStart(inputFilePath: string) {
+  const outputFilePath = inputFilePath + ".processed";
+  
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-i",
+      inputFilePath,
+      "-movflags",
+      "faststart",
+      "-map_metadata",
+      "0",
+      "-codec",
+      "copy",
+      "-f",
+      "mp4",
+      outputFilePath,
+    ],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const errText = await new Response(proc.stderr).text();
+    throw new Error(`ffmpeg failed with exit code ${exitCode}: ${errText}`);
+  }
+
+  return outputFilePath;
 }
