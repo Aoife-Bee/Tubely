@@ -9,7 +9,6 @@ import { getAssetDiskPath, getAssetURL, getAssetPath } from "./assets";
 import { getBearerToken, validateJWT } from "../auth";
 import { getVideo, updateVideo, type Video } from "../db/videos";
 import { error } from "node:console";
-import { generatePresignedURL } from "../s3";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const UPLOAD_LIMIT = 1 << 30; // 1 GB
@@ -64,8 +63,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     type: mediaType,
   });
 
-
-  video.videoURL = key;
+  video.videoURL = `${cfg.s3CfDistribution}/${key}`;
   updateVideo(cfg.db, video);
 
   await Promise.all([
@@ -73,9 +71,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     rm(processedFilePath, { force: true }),
   ]);
 
-  const signedVideo = await dbVideoToSignedVideo(cfg, video);
-
-  return respondWithJSON(200, signedVideo);
+  return respondWithJSON(200, video);
 }
 
 
@@ -157,11 +153,3 @@ async function processVideoForFastStart(inputFilePath: string) {
   return outputFilePath;
 }
 
-export async function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
-
-  if (!video.videoURL) {
-    return video;
-  }
-  const presignedURL = await generatePresignedURL(cfg, video.videoURL, 60 * 60);
-  return { ...video, videoURL: presignedURL };
-}
