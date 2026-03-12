@@ -7,8 +7,9 @@ import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { getAssetDiskPath, getAssetURL, getAssetPath } from "./assets";
 import { getBearerToken, validateJWT } from "../auth";
-import { getVideo, updateVideo } from "../db/videos";
+import { getVideo, updateVideo, type Video } from "../db/videos";
 import { error } from "node:console";
+import { generatePresignedURL } from "../s3";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const UPLOAD_LIMIT = 1 << 30; // 1 GB
@@ -54,25 +55,27 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   const aspectRatio = await getVideoAspectRatio(tempFilePath);
   const processedFilePath = await processVideoForFastStart(tempFilePath);
-  const fullAssetPath = `${aspectRatio}/${fileName}`;
+  const key = `${aspectRatio}/${fileName}`;
 
-  const s3file = cfg.s3Client.file(fullAssetPath, {
+  const s3file = cfg.s3Client.file(key, {
     bucket: cfg.s3Bucket,
   });
   await s3file.write(Bun.file(processedFilePath), {
     type: mediaType,
   });
 
-  const s3URL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${fullAssetPath}`
-  video.videoURL = s3URL;
+
+  video.videoURL = key;
   updateVideo(cfg.db, video);
 
   await Promise.all([
-    rm(tempFilePath, { force: true }),
+    rm(tempFilePath, { force: true }),  
     rm(processedFilePath, { force: true }),
   ]);
 
-  return respondWithJSON(200, video);
+  const signedVideo = await dbVideoToSignedVideo(cfg, video);
+
+  return respondWithJSON(200, signedVideo);
 }
 
 
@@ -152,4 +155,13 @@ async function processVideoForFastStart(inputFilePath: string) {
   }
 
   return outputFilePath;
+}
+
+export async function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+
+  if (!video.videoURL) {
+    return video;
+  }
+  const presignedURL = await generatePresignedURL(cfg, video.videoURL, 60 * 60);
+  return { ...video, videoURL: presignedURL };
 }
