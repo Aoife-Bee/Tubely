@@ -25,8 +25,8 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new UserForbiddenError("You don't have permission to update this video");
   }
 
-  const FormData = await req.formData();
-  const file = FormData.get("thumbnail");
+  const formData = await req.formData();
+  const file = formData.get("thumbnail");
   if (!(file instanceof File)) {
     throw new BadRequestError("No thumbnail file provided");
   }
@@ -42,7 +42,7 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Missing Content-Type for thumbnail");
   }
   if (mediaType !== "image/jpeg" && mediaType !== "image/png") {
-    throw new BadRequestError("Unsupported media type. Thumbnail must be a JPEG or PNG.");
+    throw new BadRequestError("Unsupported media type. Thumbnail must be a JPEG or PNG");
   }
 
   const fileData = await file.arrayBuffer();
